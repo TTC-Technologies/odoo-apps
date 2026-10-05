@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<templates xml:space="preserve">
+
+    <!--
+        On a scanned expense, the discussion thread is of little use: the form
+        is there to review a few fields. Its three buttons are hidden and its
+        history is folded.
+
+        A class on the <form> tag does not work: Odoo's form compiler does not
+        pass it on to the DOM (it only keeps a component property from it),
+        and the chatter is compiled as a sibling of the sheet, out of reach of
+        a class set inside it.
+
+        The patch therefore targets the chatter, which receives the model it
+        belongs to. Other models are not changed.
+    -->
+    <t t-name="expense_scan.ChatterSlim" t-inherit="mail.Chatter" t-inherit-mode="extension">
+        <xpath expr="//button[hasclass('o-mail-Chatter-sendMessage')]" position="attributes">
+            <attribute name="t-if">props.threadModel !== 'hr.expense'</attribute>
+        </xpath>
+        <xpath expr="//button[hasclass('o-mail-Chatter-logNote')]" position="attributes">
+            <attribute name="t-if">props.threadModel !== 'hr.expense'</attribute>
+        </xpath>
+        <!-- This button already has a condition: it is extended, not
+             replaced. -->
+        <xpath expr="//button[hasclass('o-mail-Chatter-activity')]" position="attributes">
+            <attribute name="t-if">props.has_activities and props.threadModel !== 'hr.expense'</attribute>
+        </xpath>
+        <!-- The history stays folded, one click away. It is rendered by a
+             component in a `t-else`, which takes no condition: the container
+             gets a class, and the stylesheet hides the history. -->
+        <xpath expr="//span[hasclass('o-mail-Chatter-topbarGrow')]" position="before">
+            <button t-if="props.threadModel === 'hr.expense'"
+                    class="o-mail-Chatter-expenseScanHistory btn btn-link text-action text-nowrap px-1"
+                    t-att-class="{ 'my-2': !props.compactHeight }"
+                    t-att-aria-expanded="state.expenseScanHistory ? 'true' : 'false'"
+                    t-on-click="() => state.expenseScanHistory = !state.expenseScanHistory">
+                <i class="fa fa-fw" t-att-class="state.expenseScanHistory ? 'fa-caret-down' : 'fa-caret-right'"
+                   aria-hidden="true"/>
+                History
+            </button>
+        </xpath>
+        <xpath expr="//div[hasclass('o-mail-Chatter-content')]" position="attributes">
+            <attribute name="t-att-class">props.threadModel === 'hr.expense' and !state.expenseScanHistory ? 'o_expense_scan_slim' : ''</attribute>
+        </xpath>
+    </t>
+
+</templates>

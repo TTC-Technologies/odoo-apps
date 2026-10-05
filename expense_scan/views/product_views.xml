@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<odoo>
+
+    <!-- Categories sorted by sequence (drag and drop). -->
+    <record id="product_product_expense_categories_tree_view_scan" model="ir.ui.view">
+        <field name="name">product.product.expense.categories.list.scan</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="hr_expense.product_product_expense_categories_tree_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="attributes">
+                <attribute name="default_order">sequence, default_code, name, id</attribute>
+            </xpath>
+            <xpath expr="//field[@name='name']" position="before">
+                <field name="sequence" widget="handle"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="product_product_expense_form_view_scan" model="ir.ui.view">
+        <field name="name">product.product.expense.form.scan</field>
+        <field name="model">product.product</field>
+        <field name="inherit_id" ref="hr_expense.product_product_expense_form_view"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='default_code']" position="after">
+                <field name="sequence" string="Display order" class="w-50"
+                       help="Position of the category in the expense dropdown. Can also be set by drag and drop in the list of categories."/>
+            </xpath>
+            <!-- Hide the taxes for a flat rate without VAT. -->
+            <xpath expr="//field[@name='supplier_taxes_id']" position="attributes">
+                <attribute name="invisible">expense_scan_no_vat</attribute>
+            </xpath>
+            <xpath expr="//field[@name='supplier_taxes_id']" position="after">
+                <field name="expense_scan_no_vat"/>
+                <field name="expense_scan_keywords"
+                       placeholder="One word per line: hotel, nocleg, Ibis..."/>
+                <field name="expense_scan_learned_keywords"
+                       invisible="not expense_scan_learned_keywords"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

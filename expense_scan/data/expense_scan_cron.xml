@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<odoo>
+
+    <!-- Pick up the pending scans if the app stopped. -->
+    <record id="ir_cron_expense_scan_pending" model="ir.cron">
+        <field name="name">Receipt scan: pick up pending scans</field>
+        <field name="model_id" ref="hr_expense.model_hr_expense"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_expense_scan_pending()</field>
+        <field name="interval_number">5</field>
+        <field name="interval_type">minutes</field>
+        <field name="active" eval="True"/>
+    </record>
+
+    <!-- Exchange rates of the European Central Bank, for the companies
+         that keep the setting on. -->
+    <record id="ir_cron_expense_scan_ecb_rates" model="ir.cron">
+        <field name="name">Receipt scan: exchange rates of the European Central Bank</field>
+        <field name="model_id" ref="base.model_res_currency"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_expense_scan_ecb_rates()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
+
+    <!-- Words of each category, learnt from the receipts filed by the team. -->
+    <record id="ir_cron_expense_scan_learn_words" model="ir.cron">
+        <field name="name">Receipt scan: learn the words of each category</field>
+        <field name="model_id" ref="hr_expense.model_hr_expense"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_expense_scan_learn_words()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
+
+    <!-- Safety net: the expense line of each sales order follows the approved
+         expenses of its projects. It normally moves at each approval. -->
+    <record id="ir_cron_expense_scan_order_lines" model="ir.cron">
+        <field name="name">Receipt scan: update the expense line of the sales orders</field>
+        <field name="model_id" ref="hr_expense.model_hr_expense"/>
+        <field name="state">code</field>
+        <field name="code">model._expense_scan_sync_all()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
+
+    <!-- Erase the text read (personal data) after the configured delay. -->
+    <record id="ir_cron_expense_scan_purge_texts" model="ir.cron">
+        <field name="name">Receipt scan: erase the text read on old expenses</field>
+        <field name="model_id" ref="hr_expense.model_hr_expense"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_expense_scan_purge_texts()</field>
+        <field name="interval_number">1</field>
+        <field name="interval_type">days</field>
+        <field name="active" eval="True"/>
+    </record>
+
+</odoo>

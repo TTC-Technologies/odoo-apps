@@ -1,0 +1,344 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<odoo>
+
+    <record id="hr_expense_view_form_scan" model="ir.ui.view">
+        <field name="name">hr.expense.form.scan</field>
+        <field name="model">hr.expense</field>
+        <field name="inherit_id" ref="hr_expense.hr_expense_view_form"/>
+        <field name="arch" type="xml">
+
+            <xpath expr="//header/button[1]" position="before">
+                <!-- Keeps the expense as a draft and goes back to the list:
+                     "Submit" stays the main action. -->
+                <button name="action_expense_scan_done" type="object"
+                        string="Save and close"
+                        invisible="state != 'draft'"/>
+            </xpath>
+
+            <!-- Delete button at the end of the bar, behind a confirmation. -->
+            <xpath expr="//header" position="inside">
+                <button name="action_expense_scan_drop" type="object"
+                        icon="fa-trash" title="Delete" class="text-danger"
+                        confirm="Delete this expense and its receipt for good?"
+                        invisible="state != 'draft'">
+                    <span class="d-none d-md-inline ms-1">Delete</span>
+                </button>
+            </xpath>
+
+            <!-- "Back to draft" button: reopens the expense for correction; two versions depending on the accounting group. -->
+            <xpath expr="//header/button[@name='action_reset'][@groups='account.group_account_invoice']"
+                   position="attributes">
+                <attribute name="string">Back to draft</attribute>
+            </xpath>
+            <xpath expr="//header/button[@name='action_reset'][@groups='!account.group_account_invoice']"
+                   position="attributes">
+                <attribute name="string">Back to draft</attribute>
+            </xpath>
+
+            <!-- Hide the attachment widget (duplicate of the attachments panel). -->
+            <xpath expr="(//widget[@name='attach_document'])[1]" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+            <xpath expr="(//widget[@name='attach_document'])[2]" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+
+            <!-- Hide the Split button in the header (still in the Actions menu). -->
+            <xpath expr="(//button[@name='action_split_wizard'])[1]" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+            <xpath expr="(//button[@name='action_split_wizard'])[2]" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+
+            <!-- Open the attachments panel by default. -->
+            <xpath expr="//chatter" position="attributes">
+                <attribute name="open_attachments">1</attribute>
+            </xpath>
+
+            <xpath expr="//div[@name='warning_duplicate_receipt_expense']" position="after">
+                <!-- Scan progress; the fields fill in while the receipt is read. -->
+                <widget name="expense_scan_progress"/>
+                <div class="alert alert-warning d-flex align-items-center gap-2"
+                     role="alert" name="expense_scan_todo"
+                     invisible="not expense_scan_todo_unplaced or state != 'draft'">
+                    <i class="fa fa-search" role="img" aria-label="Scan"/>
+                    <span>
+                        Receipt scanned. Check these fields before submitting:
+                        <field name="scan_todo" class="fw-bold" nolabel="1" readonly="1"/>
+                    </span>
+                </div>
+                <div class="alert alert-danger d-flex align-items-center gap-2"
+                     role="alert" name="expense_scan_error"
+                     invisible="scan_state != 'error'">
+                    <i class="fa fa-exclamation-triangle" role="img" aria-label="Error"/>
+                    <span>
+                        The receipt scan failed, enter the expense by hand.
+                        <!-- The technical reason is for the people who can act on it. -->
+                        <field name="scan_message" nolabel="1" readonly="1"
+                               groups="hr_expense.group_hr_expense_manager"/>
+                    </span>
+                </div>
+            </xpath>
+
+            <!-- Receipt preview on small screens (native panel on large screens). -->
+            <xpath expr="//sheet/div[hasclass('oe_title')]" position="before">
+                <widget name="expense_scan_receipt"/>
+            </xpath>
+
+            <!-- Amount and currency on one line, with fixed widths (see expense_scan.scss). -->
+            <xpath expr="//field[@name='total_amount_currency']" position="attributes">
+                <attribute name="class">oe_inline me-2 o_expense_scan_amount</attribute>
+            </xpath>
+            <xpath expr="//field[@name='total_amount_currency']/parent::div/field[@name='currency_id']"
+                   position="attributes">
+                <attribute name="class">oe_inline ms-0 o_expense_scan_currency</attribute>
+            </xpath>
+
+            <!-- Unit price editable for flat rates with a variable scale (mileage). -->
+            <xpath expr="//field[@name='price_unit'][@widget='monetary']" position="attributes">
+                <attribute name="readonly">not is_editable</attribute>
+            </xpath>
+
+            <!-- Hide the duplicate tax amount (still on the taxes line). -->
+            <xpath expr="//field[@name='total_amount_currency']/parent::div/span" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+            <xpath expr="//field[@name='tax_amount_currency']" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+
+            <!-- Tax amount and rate on one line; fixed width amount to avoid overflow. -->
+            <xpath expr="//field[@name='tax_ids']" position="before">
+                <field name="scan_tax_amount" widget="monetary"
+                       options="{'currency_field': 'currency_id'}"
+                       readonly="not is_editable" nolabel="1"
+                       class="oe_inline me-2 o_expense_scan_amount"
+                       placeholder="Receipt tax"/>
+            </xpath>
+
+            <xpath expr="//field[@name='tax_ids']/parent::div" position="attributes">
+                <attribute name="invisible">expense_scan_no_vat</attribute>
+            </xpath>
+            <!-- Rate required when a tax amount is entered (flat rates without VAT). -->
+            <xpath expr="//field[@name='tax_ids']" position="attributes">
+                <attribute name="required">scan_tax_amount and not expense_scan_no_vat</attribute>
+            </xpath>
+
+            <!-- Categories ordered by sequence; full list without "Search more". -->
+            <xpath expr="//field[@name='product_id']" position="attributes">
+                <attribute name="context">{
+                    'default_type': 'service',
+                    'default_can_be_expensed': 1,
+                    'list_view_ref': 'hr_expense.product_product_expense_tree_view',
+                    'form_view_ref': 'hr_expense.product_product_expense_form_view',
+                    'expense_scan_category_order': True,
+                }</attribute>
+            </xpath>
+            <!-- The tax line goes under the total amount. -->
+            <xpath expr="//field[@name='total_amount_currency']/parent::div" position="after">
+                <xpath expr="//label[@for='tax_ids']" position="move"/>
+                <xpath expr="//field[@name='tax_ids']/parent::div" position="move"/>
+            </xpath>
+            <xpath expr="//label[@for='tax_ids']" position="attributes">
+                <attribute name="for">scan_tax_amount</attribute>
+                <attribute name="string">Receipt tax</attribute>
+                <attribute name="invisible">expense_scan_no_vat</attribute>
+            </xpath>
+
+            <!-- The date goes after the amounts. -->
+            <xpath expr="//label[@id='lo']" position="before">
+                <xpath expr="//field[@name='date']" position="move"/>
+            </xpath>
+
+            <!-- Nights (hotel only) after the date. -->
+            <xpath expr="//field[@name='date']" position="after">
+                <field name="expense_scan_nights"
+                       invisible="not expense_scan_nights_required"
+                       required="expense_scan_nights_required"
+                       readonly="not is_editable"
+                       class="o_expense_scan_nights"/>
+            </xpath>
+
+            <!-- Manager hidden: deduced from the hierarchy. -->
+            <xpath expr="//field[@name='manager_id']" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+
+            <!-- Account and analytic distribution: set automatically from the
+                 category and the project, shown to expense managers only.
+                 Odoo's groups stay on the fields (full accounting features
+                 for the account, analytic accounting for the distribution):
+                 both conditions apply. -->
+            <xpath expr="//field[@name='account_id']" position="attributes">
+                <attribute name="invisible">not expense_scan_expense_manager</attribute>
+            </xpath>
+            <xpath expr="//field[@name='analytic_distribution']" position="attributes">
+                <attribute name="invisible">not expense_scan_expense_manager</attribute>
+            </xpath>
+
+            <!-- Hide the vendor (deduced from the receipt when "Paid by company"). -->
+            <xpath expr="//field[@name='vendor_id']" position="attributes">
+                <attribute name="invisible">1</attribute>
+            </xpath>
+
+            <!-- Payment method hidden if a single one is set up or not "Paid by company". -->
+            <xpath expr="//field[@name='payment_method_line_id']" position="attributes">
+                <attribute name="invisible">payment_mode != 'company_account' or expense_scan_one_payment_method</attribute>
+            </xpath>
+
+            <!-- Horizontal radio buttons. -->
+            <xpath expr="//field[@name='payment_mode']" position="attributes">
+                <attribute name="options">{'horizontal': True}</attribute>
+            </xpath>
+
+            <!-- Re-invoicing after payment; project_id and task_id follow the user's domain. -->
+            <xpath expr="//div[@id='payment_mode']" position="after">
+                <xpath expr="//field[@name='payment_method_line_id']" position="move"/>
+                <field name="expense_scan_sales" invisible="1"/>
+                <label for="reinvoice_mode" invisible="not expense_scan_reinvoice or not expense_scan_sales"/>
+                <div invisible="not expense_scan_reinvoice or not expense_scan_sales">
+                    <field name="reinvoice_mode" widget="radio"
+                           options="{'horizontal': True}" nolabel="1"
+                           readonly="not is_editable"/>
+                </div>
+                <!-- Without the Sales app, the answer is always "No": say what to do. -->
+                <div colspan="2" class="text-muted o_expense_scan_hint"
+                     invisible="not expense_scan_reinvoice or expense_scan_sales">
+                    This expense cannot be re-invoiced yet: re-invoicing goes through a sales order. To re-invoice it, install the Sales app, create the customer's order, then select that order on the project (Invoicing tab). Until then the expense is only followed in the project budget.
+                </div>
+                <field name="expense_scan_hint_reinvoice" nolabel="1" colspan="2" readonly="1"
+                       invisible="not expense_scan_hint_reinvoice or not expense_scan_reinvoice"
+                       class="o_expense_scan_hint"/>
+                <!-- The domain comes from a computed field: it depends on the
+                     user, not on the expense. An employee only sees their
+                     projects. Without a suitable project, "To be decided" is
+                     still available; offering to create one would open a form
+                     their rights do not let them save. -->
+                <!-- With "No", the project is optional: the cost is charged
+                     to the project budget without being re-invoiced. -->
+                <field name="project_id"
+                       invisible="not expense_scan_reinvoice"
+                       required="expense_scan_reinvoice and reinvoice_mode == 'project'"
+                       readonly="not is_editable"
+                       domain="expense_scan_project_domain"
+                       options="{'no_quick_create': True}"
+                       placeholder="project (invoicing or budget tracking)"/>
+                <field name="expense_scan_task_id"
+                       groups="project.group_project_user"
+                       invisible="not expense_scan_has_tasks"
+                       readonly="not is_editable"
+                       options="{'no_create': True}"
+                       placeholder="task, for tracking"/>
+            </xpath>
+
+            <!-- Employee hidden for one's own expense; shown when entering for someone else. -->
+            <xpath expr="//field[@name='expense_scan_task_id']" position="after">
+                <xpath expr="//field[@name='employee_id'][@groups='!hr.group_hr_user']"
+                       position="move"/>
+                <xpath expr="//field[@name='employee_id'][@groups='hr.group_hr_user']"
+                       position="move"/>
+            </xpath>
+            <xpath expr="//field[@name='employee_id'][@groups='!hr.group_hr_user']"
+                   position="attributes">
+                <attribute name="invisible">expense_scan_own</attribute>
+            </xpath>
+            <xpath expr="//field[@name='employee_id'][@groups='hr.group_hr_user']"
+                   position="attributes">
+                <attribute name="invisible">expense_scan_own</attribute>
+            </xpath>
+
+            <!-- Hints under the fields to check: cleared once corrected. -->
+            <xpath expr="//field[@name='expense_scan_nights']" position="after">
+                <field name="expense_scan_hint_date" nolabel="1" colspan="2" readonly="1"
+                       invisible="not expense_scan_hint_date" class="o_expense_scan_hint"/>
+            </xpath>
+            <xpath expr="//field[@name='total_amount_currency']/parent::div" position="after">
+                <field name="expense_scan_hint_total" nolabel="1" colspan="2" readonly="1"
+                       invisible="not expense_scan_hint_total" class="o_expense_scan_hint"/>
+            </xpath>
+            <xpath expr="//field[@name='tax_ids']/parent::div" position="after">
+                <field name="expense_scan_hint_tax" nolabel="1" colspan="2" readonly="1"
+                       invisible="not expense_scan_hint_tax or expense_scan_no_vat"
+                       class="o_expense_scan_hint"/>
+            </xpath>
+            <xpath expr="//field[@name='product_id']" position="after">
+                <field name="expense_scan_hint_category" nolabel="1" colspan="2" readonly="1"
+                       invisible="not expense_scan_hint_category" class="o_expense_scan_hint"/>
+            </xpath>
+
+            <xpath expr="//field[@name='nb_attachment']" position="after">
+                <field name="expense_scan_todo_unplaced" invisible="1"/>
+                <field name="scan_state" invisible="1"/>
+                <field name="expense_scan_todo_pending" invisible="1"/>
+                <field name="expense_scan_reinvoice" invisible="1"/>
+                <field name="expense_scan_own" invisible="1"/>
+                <field name="expense_scan_expense_manager" invisible="1"/>
+                <field name="expense_scan_one_payment_method" invisible="1"/>
+                <field name="expense_scan_project_domain" invisible="1"/>
+                <field name="expense_scan_no_vat" invisible="1"/>
+                <field name="expense_scan_nights_required" invisible="1"/>
+                <field name="expense_scan_has_tasks" invisible="1"/>
+                <field name="message_main_attachment_id" invisible="1"/>
+            </xpath>
+
+            <!-- Scan details, at the bottom of the form -->
+            <xpath expr="//sheet" position="inside">
+                <group string="Receipt scan" name="expense_scan_details"
+                       invisible="scan_state == 'none'" col="2">
+                    <field name="scan_message" readonly="1"
+                           invisible="scan_state == 'error' and not expense_scan_expense_manager"/>
+                    <field name="expense_scan_merchant" readonly="not is_editable"
+                           placeholder="Merchant on the receipt"/>
+                    <field name="expense_scan_category_reason" readonly="1"
+                           invisible="not expense_scan_category_reason"/>
+                    <field name="scan_detected_tax" readonly="1"
+                           invisible="not scan_detected_tax"/>
+                    <!-- Without a printed time, the timestamp would show midnight. -->
+                    <field name="scan_time" invisible="1"/>
+                    <field name="scan_datetime" readonly="1"
+                           invisible="not scan_datetime or not scan_time"/>
+                    <field name="scan_original_attachment_id" readonly="1"
+                           invisible="not scan_original_attachment_id"/>
+                    <field name="scan_engine" invisible="1"/>
+                    <field name="scan_duration" invisible="1"/>
+                    <field name="scan_score" invisible="1"/>
+                    <div colspan="2">
+                        <button name="action_expense_scan_rescan" type="object"
+                                string="Scan again" icon="fa-refresh"
+                                class="btn btn-secondary btn-sm"
+                                invisible="not is_editable or state not in ('draft', 'submitted')"/>
+                    </div>
+                    <field name="scan_raw_text" readonly="1" colspan="2"
+                           widget="text" invisible="not scan_raw_text"
+                           class="o_expense_scan_raw_text"/>
+                </group>
+            </xpath>
+
+        </field>
+    </record>
+
+    <!-- Receipt thumbnail on the cards, to recognise a receipt without
+         reading the text. -->
+    <record id="hr_expense_view_kanban_scan" model="ir.ui.view">
+        <field name="name">hr.expense.kanban.scan</field>
+        <field name="model">hr.expense</field>
+        <field name="inherit_id" ref="hr_expense.hr_expense_view_expenses_analysis_kanban"/>
+        <field name="arch" type="xml">
+            <xpath expr="//kanban/field[@name='currency_id']" position="after">
+                <field name="message_main_attachment_id"/>
+                <field name="expense_scan_main_mimetype"/>
+            </xpath>
+            <xpath expr="//templates//t[@t-name='card']" position="inside">
+                <!-- Only an image has a thumbnail: a PDF would show a broken picture. -->
+                <img t-if="record.message_main_attachment_id.raw_value and (record.expense_scan_main_mimetype.raw_value or '').startsWith('image/')"
+                     t-att-src="'/web/image/' + record.message_main_attachment_id.raw_value"
+                     class="o_expense_scan_card_thumb mt-2"
+                     alt="Receipt thumbnail"/>
+            </xpath>
+        </field>
+    </record>
+
+</odoo>

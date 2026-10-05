@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<odoo noupdate="1">
+
+    <!-- Basic template: blank workbook delivered at installation; download, adapt, upload again. -->
+    <record id="export_template_basic" model="expense.scan.export.template">
+        <field name="name">Expense sheet (basic template)</field>
+        <field name="sequence">1</field>
+        <field name="first_row">8</field>
+        <field name="last_row">9</field>
+        <field name="note">Workbook delivered with the module: download it from the "Excel file" field, adapt it (logo, colours, columns), then upload it again. Keep a row of titles above the expenses and the totals just below: the export adds or removes rows and the totals follow. The "Blank workbook" button builds a new one from the mappings below.</field>
+    </record>
+
+    <record id="export_template_basic_salarie" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">B3</field>
+        <field name="value">salarie</field>
+    </record>
+    <record id="export_template_basic_periode" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">B4</field>
+        <field name="value">periode</field>
+    </record>
+    <record id="export_template_basic_societe" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">B5</field>
+        <field name="value">societe</field>
+    </record>
+    <record id="export_template_basic_prestation" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">E3</field>
+        <field name="value">prestation</field>
+    </record>
+    <record id="export_template_basic_total" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">E4</field>
+        <field name="value">total_ttc</field>
+    </record>
+
+    <record id="export_template_basic_a" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">A</field>
+        <field name="value">n</field>
+    </record>
+    <record id="export_template_basic_b" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">B</field>
+        <field name="value">date</field>
+    </record>
+    <record id="export_template_basic_c" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">C</field>
+        <field name="value">categorie</field>
+    </record>
+    <record id="export_template_basic_d" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">D</field>
+        <field name="value">description</field>
+    </record>
+    <record id="export_template_basic_e" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">E</field>
+        <field name="value">enseigne</field>
+    </record>
+    <record id="export_template_basic_f" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">F</field>
+        <field name="value">mission</field>
+    </record>
+    <record id="export_template_basic_g" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">G</field>
+        <field name="value">quantite</field>
+    </record>
+    <record id="export_template_basic_h" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">H</field>
+        <field name="value">total_ht</field>
+    </record>
+    <record id="export_template_basic_i" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">I</field>
+        <field name="value">taux_tva</field>
+    </record>
+    <record id="export_template_basic_j" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">J</field>
+        <field name="value">total_tva</field>
+    </record>
+    <record id="export_template_basic_k" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">K</field>
+        <field name="value">total_ttc</field>
+    </record>
+    <record id="export_template_basic_l" model="expense.scan.export.column">
+        <field name="template_id" ref="export_template_basic"/>
+        <field name="cell">L</field>
+        <field name="value">mode_paiement</field>
+    </record>
+
+    <function model="expense.scan.export.template" name="_expense_scan_fill_blank_files"/>
+
+</odoo>

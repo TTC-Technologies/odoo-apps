@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<odoo noupdate="1">
+
+    <!-- General rules, without amounts: ceilings depend on the country and
+         the company. Duplicate the set to adapt it, or archive it. -->
+    <record id="policy_good_practice" model="expense.scan.policy"
+            context="{'expense_scan_no_recheck': True}">
+        <field name="name">Good practice</field>
+        <field name="apply_to_all" eval="True"/>
+        <field name="note">Examples to adjust: add your own ceilings per meal, per day or per night, following the rules of your country and of your company.
+
+Beyond a ceiling, an actual expense can usually be reimbursed if it is justified. Fines and personal expenses are neither business expenses nor deductible.</field>
+    </record>
+
+    <record id="policy_good_practice_personal" model="expense.scan.policy.rule"
+            context="{'expense_scan_no_recheck': True}">
+        <field name="policy_id" ref="policy_good_practice"/>
+        <field name="sequence">4</field>
+        <field name="name">Fines and personal expenses: neither business expenses nor deductible</field>
+        <field name="rule_type">forbidden_words</field>
+        <field name="words">fine
+penalty notice
+parking fine
+amende
+contravention
+bußgeld
+strafzettel
+multa
+contravvenzione
+boete
+mandat
+cigarettes
+lottery
+loto
+casino</field>
+    </record>
+    <record id="policy_good_practice_hotel_extras" model="expense.scan.policy.rule"
+            context="{'expense_scan_no_recheck': True}">
+        <field name="policy_id" ref="policy_good_practice"/>
+        <field name="sequence">5</field>
+        <field name="name">Personal hotel extras (minibar, films, laundry): paid by the employee</field>
+        <field name="family">lodging</field>
+        <field name="rule_type">forbidden_words</field>
+        <field name="words">minibar
+mini bar
+pay tv
+vod
+film
+movie
+laundry
+pressing
+blanchisserie
+spa</field>
+    </record>
+    <record id="policy_good_practice_alcohol" model="expense.scan.policy.rule"
+            context="{'expense_scan_no_recheck': True}">
+        <field name="policy_id" ref="policy_good_practice"/>
+        <field name="sequence">6</field>
+        <field name="name">Alcohol on a meal bill: moderate consumption, to be justified</field>
+        <field name="family">meal</field>
+        <field name="rule_type">forbidden_words</field>
+        <field name="words">wine
+beer
+champagne
+whisky
+cocktail
+vodka
+rum
+vin
+bière
+wein
+bier
+vino
+birra
+cerveza</field>
+    </record>
+    <record id="policy_good_practice_travel_class" model="expense.scan.policy.rule"
+            context="{'expense_scan_no_recheck': True}">
+        <field name="policy_id" ref="policy_good_practice"/>
+        <field name="sequence">7</field>
+        <field name="name">Train in 2nd class, plane in economy class, unless agreed beforehand</field>
+        <field name="family">train_air</field>
+        <field name="rule_type">forbidden_words</field>
+        <field name="words">1st class
+first class
+business
+1ère classe
+1re classe
+première classe
+classe affaires
+1. klasse
+prima classe</field>
+    </record>
+    <function model="expense.scan.policy" name="_expense_scan_recheck_all"/>
+
+</odoo>

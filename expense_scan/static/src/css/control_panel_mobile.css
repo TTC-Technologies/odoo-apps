@@ -1,0 +1,42 @@
+/* Copyright 2026 T.T.C. SAS
+   License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). */
+/*
+ * "New" in the bar of the expense lists, on a phone.
+ *
+ * Below 768 px, web/static/src/search/control_panel/control_panel_mobile.css
+ * only keeps the first button of the bar visible and puts the next ones in
+ * the "⋮" menu, with !important, even when there is room left. On expenses,
+ * the first one is "Scan" and "New" is hidden, although both fit on one line
+ * down to 320 px wide.
+ *
+ * The menu then only holds these two buttons, already visible: "⋮" is hidden
+ * too, but only when the bar holds nothing else (a module that adds a button
+ * there keeps its menu).
+ *
+ * A CSS file and not SCSS, like Odoo's: Odoo's SCSS compiler handles nested
+ * level 4 selectors badly, and a failed compilation leaves the whole
+ * interface blank.
+ *
+ * Specificity: Odoo's rule counts three classes with !important; these
+ * selectors count four, plus an element, to win whatever the order of the
+ * stylesheets.
+ */
+@media (max-width: 767.98px) {
+    body .o_hr_expense_dashboard_kanban_view .o_control_panel .o_control_panel_main_buttons > .o-kanban-button-new,
+    body .o_hr_expense_dashboard_kanban_view .o_control_panel .o_control_panel_main_buttons > .o_list_button_add,
+    body .o_hr_expense_kanban_view .o_control_panel .o_control_panel_main_buttons > .o-kanban-button-new,
+    body .o_hr_expense_kanban_view .o_control_panel .o_control_panel_main_buttons > .o_list_button_add,
+    body .o_hr_expense_dashboard_list_view .o_control_panel .o_control_panel_main_buttons > .o-kanban-button-new,
+    body .o_hr_expense_dashboard_list_view .o_control_panel .o_control_panel_main_buttons > .o_list_button_add,
+    body .o_hr_expense_list_view .o_control_panel .o_control_panel_main_buttons > .o-kanban-button-new,
+    body .o_hr_expense_list_view .o_control_panel .o_control_panel_main_buttons > .o_list_button_add {
+        display: inline-block !important;
+    }
+
+    body .o_hr_expense_dashboard_kanban_view .o_control_panel .o_control_panel_main_buttons:not(:has(> :not(.d-none, .o_button_upload_expense, .o-kanban-button-new, .o_list_button_add, .o-control-panel-adaptive-dropdown))) > button.o-control-panel-adaptive-dropdown,
+    body .o_hr_expense_kanban_view .o_control_panel .o_control_panel_main_buttons:not(:has(> :not(.d-none, .o_button_upload_expense, .o-kanban-button-new, .o_list_button_add, .o-control-panel-adaptive-dropdown))) > button.o-control-panel-adaptive-dropdown,
+    body .o_hr_expense_dashboard_list_view .o_control_panel .o_control_panel_main_buttons:not(:has(> :not(.d-none, .o_button_upload_expense, .o-kanban-button-new, .o_list_button_add, .o-control-panel-adaptive-dropdown))) > button.o-control-panel-adaptive-dropdown,
+    body .o_hr_expense_list_view .o_control_panel .o_control_panel_main_buttons:not(:has(> :not(.d-none, .o_button_upload_expense, .o-kanban-button-new, .o_list_button_add, .o-control-panel-adaptive-dropdown))) > button.o-control-panel-adaptive-dropdown {
+        display: none !important;
+    }
+}

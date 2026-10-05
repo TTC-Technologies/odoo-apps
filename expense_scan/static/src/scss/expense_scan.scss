@@ -1,0 +1,294 @@
+/* Copyright 2026 T.T.C. SAS
+   License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). */
+// ---------------------------------------------------------------------------
+// Split view on medium screens
+//
+// mail/core/common/attachment_view.scss only styles the
+// `.o_attachment_preview` panel from the XXL breakpoint (1400 px). The
+// JavaScript patch shows this panel from MD; only the styling is missing in
+// that range. It is written again here without reusing Odoo's mixin, so that
+// compiling the asset bundle does not depend on that mixin.
+// ---------------------------------------------------------------------------
+@media (min-width: 768px) and (max-width: 1399.98px) {
+    // Odoo only switches the container to a row layout (`flex-nowrap h-100`
+    // instead of `flex-column`) from 1400 px. Without this rule, the panel is
+    // rendered under the form, about thirty pixels high. The rule applies the
+    // XXL layout.
+    //
+    // Odoo's classes are Bootstrap utilities with `!important`: the rules
+    // below are too. `:has()` limits the effect to the forms that render
+    // this panel in that range, that is expenses (JavaScript patch).
+    .o_form_view .o_form_renderer:has(> .o_attachment_preview) {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        height: 100% !important;
+
+        > .o_form_sheet_bg {
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: auto;
+        }
+    }
+
+    .o_attachment_preview {
+        display: block;
+        flex: auto;
+        overflow: hidden;
+        width: 38%;
+        min-width: 300px;
+        max-width: 560px;
+
+        > .o-mail-Attachment {
+            position: relative;
+            width: 100%;
+            height: 100%;
+
+            > iframe {
+                width: 100%;
+                height: 100%;
+            }
+
+            > .o-mail-Attachment-imgContainer {
+                position: absolute;
+                overflow: auto;
+                width: 100%;
+                height: 100%;
+
+                > img {
+                    margin: auto;
+                    max-width: 100%;
+                    box-shadow: 0 0 5px rgba(41, 41, 41, 0.43);
+                }
+            }
+        }
+    }
+
+    // The button that detaches the receipt into a separate window is only
+    // styled in Odoo's XXL block: it is hidden here.
+    .o_attachment_control {
+        display: none;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Amount and currency
+//
+// In their `o_row` line, both fields grow equally. The currency dropdown
+// claims all the space available: on a phone, the amount shrinks to zero
+// pixels and its content overflows under the currency.
+//
+// A fixed basis for each field solves this at every width. The width of the
+// amount cannot follow its content, which is sized as a percentage of its
+// parent.
+//
+// Specificity: in edit mode, Odoo sets `flex: 1 1 auto` through
+// `.o_form_view .o_form_editable .o_row > .o_field_widget` (four classes).
+// A three-class rule loses whatever its position in the sheet; five are
+// needed. The variant without `.o_form_editable` covers read-only mode,
+// where Odoo's rule does not apply.
+// ---------------------------------------------------------------------------
+.o_form_view .o_row,
+.o_form_view .o_form_editable .o_row {
+    > .o_field_widget.o_expense_scan_amount {
+        flex: 0 0 7rem;
+    }
+
+    > .o_field_widget.o_expense_scan_currency {
+        flex: 0 0 6rem;
+    }
+}
+// Receipt tax and its rate share a line. In a narrow form (split view on a
+// tablet in landscape), the rate goes under the amount instead of shrinking
+// to an unreadable dot.
+.o_form_view .o_row:has(> .o_expense_scan_amount):has(> .o_field_many2many_tax_tags) {
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+    > .o_field_many2many_tax_tags {
+        flex: 1 0 8rem;
+        min-width: 8rem;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Preview strip on a phone
+// ---------------------------------------------------------------------------
+.o_expense_scan_preview {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-height: 32vh;
+    overflow: hidden;
+    margin-bottom: 12px;
+    padding: 4px 0;
+    background-color: #f4f4f4;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+
+    // Expanded: the whole receipt, as wide as the screen. The strip is no
+    // longer pinned, the page scrolls along a long receipt.
+    &.o_expense_scan_preview_expanded {
+        position: static;
+        max-height: none;
+
+        .o_expense_scan_preview_img {
+            max-height: none;
+        }
+    }
+
+    // The strip only has a maximum height: a percentage would not apply to
+    // the image, which kept its own height and had its top and bottom cut.
+    .o_expense_scan_preview_img {
+        max-height: calc(32vh - 8px);
+        max-width: 100%;
+        object-fit: contain;
+        cursor: zoom-in;
+    }
+
+    .o_expense_scan_preview_actions {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        display: flex;
+        gap: 4px;
+        opacity: 0.9;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Scan details
+// ---------------------------------------------------------------------------
+.o_expense_scan_raw_text textarea,
+.o_expense_scan_raw_text {
+    font-family: var(--bs-font-monospace, monospace);
+    font-size: 0.8em;
+    white-space: pre-wrap;
+    max-height: 240px;
+    overflow: auto;
+}
+
+// ---------------------------------------------------------------------------
+// Chatter history on an expense
+//
+// The three buttons are removed by template inheritance (see
+// static/src/xml/chatter_patch.xml). The history is rendered by a component
+// placed in a `t-else`, on which no condition can be added: its container
+// gets a class, set by the same inheritance.
+//
+// `!important` is needed: the thread carries the Bootstrap utility `d-flex`,
+// with `!important`, which an ordinary rule cannot override.
+// ---------------------------------------------------------------------------
+.o_expense_scan_slim .o-mail-Thread {
+    display: none !important;
+}
+
+// ---------------------------------------------------------------------------
+// Receipt thumbnail on the kanban cards
+// ---------------------------------------------------------------------------
+.o_expense_scan_card_thumb {
+    display: block;
+    width: 100%;
+    max-height: 140px;
+    object-fit: cover;
+    object-position: top;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+
+
+
+// ---------------------------------------------------------------------------
+// Hint under a field to check
+// ---------------------------------------------------------------------------
+// A line in the warning colour, without an icon, that goes away when the
+// field is corrected.
+.o_expense_scan_hint {
+    margin-top: -0.35rem;
+    margin-bottom: 0.35rem;
+    font-size: 0.875rem;
+    color: $warning;
+    color: color-mix(in srgb, #{$warning} 75%, black);
+}
+
+// Retouch canvas: `touch-action: none` stops the page from scrolling while a
+// handle is dragged on a phone.
+.o_expense_scan_retouch_stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.o_expense_scan_retouch_canvas {
+    max-width: 100%;
+    max-height: 100%;
+    touch-action: none;
+    cursor: crosshair;
+    background: repeating-conic-gradient(#e9ecef 0% 25%, #fff 0% 50%) 50% / 16px 16px;
+    &.o_expense_scan_retouch_dragging {
+        cursor: grabbing;
+    }
+}
+
+// "Retouch" button at the bottom of the preview panel. Odoo positions the
+// image container absolutely, at 100% height under the title; with the
+// button, the panel becomes a column and the container fills the space
+// between the title and the button.
+.o_attachment_preview > .o-mail-Attachment:has(> .o_expense_scan_retouch_control) {
+    display: flex;
+    flex-direction: column;
+    > .o-mail-Attachment-imgContainer,
+    > iframe {
+        position: relative;
+        flex: 1 1 auto;
+        min-height: 0;
+        height: auto;
+        margin-bottom: 3rem;
+    }
+}
+.o_expense_scan_retouch_control {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1;
+}
+
+.o_expense_scan_retouch_angle {
+    min-width: 3.5em;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+// Signs of the expense rules: the text form of "ℹ︎" is a small letter, hard
+// to see next to "⚠" without a larger, bold glyph.
+.o_expense_scan_policy_sign {
+    font-size: 1.15em;
+    font-weight: bold;
+}
+
+// Line under Odoo's message on an empty expense list: Odoo styles the
+// paragraphs of that message as headings.
+.o_nocontent_help .o_expense_scan_empty_hint {
+    font-size: 1rem;
+    font-weight: normal;
+    margin-top: 1rem;
+}
+
+// Settings fields whose value or placeholder is longer than Odoo's default width.
+.o_expense_scan_wide_field {
+    min-width: 18em;
+}
+
+// A hot cup of coffee (steam above the mug), drawn here because Font Awesome's
+// "coffee" has none. It takes the colour of the text around it.
+.o_expense_scan_coffee {
+    display: inline-block;
+    width: 1.2em;
+    height: 1.2em;
+    vertical-align: -0.25em;
+    background-color: currentColor;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 10h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z'/%3E%3Cpath fill='none' stroke='black' stroke-width='2' stroke-linecap='round' d='M17 12h1.5a2.5 2.5 0 0 1 0 5H17M8 2.5c-1 1.3 1 2.4 0 4M12 2.5c-1 1.3 1 2.4 0 4M16 2.5c-1 1.3 1 2.4 0 4'/%3E%3C/svg%3E") no-repeat center / contain;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M4 10h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z'/%3E%3Cpath fill='none' stroke='black' stroke-width='2' stroke-linecap='round' d='M17 12h1.5a2.5 2.5 0 0 1 0 5H17M8 2.5c-1 1.3 1 2.4 0 4M12 2.5c-1 1.3 1 2.4 0 4M16 2.5c-1 1.3 1 2.4 0 4'/%3E%3C/svg%3E") no-repeat center / contain;
+}

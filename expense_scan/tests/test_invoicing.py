@@ -1,0 +1,598 @@
+# -*- coding: utf-8 -*-
+# Copyright 2026 T.T.C. SAS
+# License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0).
+"""Re-invoicing the expenses of a project on one line of its sales order.
+
+These scenarios need Sales and a chart of accounts: without them they skip.
+"""
+import unittest
+from unittest.mock import patch
+
+from odoo import Command
+from odoo.exceptions import AccessError, UserError, ValidationError
+from odoo.tests import common, tagged
+
+from .tax_setup import ensure_fiscal_country
+from .test_category import reading
+from .test_independence import _migration
+
+
+@tagged('post_install', '-at_install')
+class TestInvoicing(common.TransactionCase):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        if 'sale.order' not in cls.env or 'reinvoiced_sale_order_id' not in cls.env['project.project']._fields:
+            raise unittest.SkipTest("Sales is not installed")
+        # A database without a chart of accounts may have no country or tax group for a tax.
+        ensure_fiscal_country(cls.env)
+        cls.company = cls.env.company
+        cls.company.expense_scan_reinvoice = True
+        cls.employee = cls.env['hr.employee'].create({
+            'name': "Hugo Facturable",
+            # With a manager the expenses stay "submitted" until approved.
+            'expense_manager_id': cls.env.ref('base.user_admin').id,
+        })
+        cls.category = cls.env['product.product'].create(
+            {'name': "Hotel facturable", 'can_be_expensed': True, 'standard_price': 0.0,
+             'supplier_taxes_id': [Command.clear()]})
+        cls.service = cls.env['product.product'].create({
+            'name': "Assistance facturable", 'type': 'service', 'list_price': 500.0,
+            'invoice_policy': 'delivery'})
+        cls.expense_product = cls.env['product.product'].create({
+            'name': "Depenses facturables", 'type': 'service', 'list_price': 1.0,
+            'can_be_expensed': True, 'expense_policy': 'cost', 'invoice_policy': 'order'})
+        cls.partner = cls.env['res.partner'].create({'name': "Client Facturable"})
+        cls.project = cls.env['project.project'].create({'name': "Mission facturable"})
+        cls.order = cls.env['sale.order'].create({
+            'partner_id': cls.partner.id,
+            'order_line': [
+                Command.create({'product_id': cls.service.id, 'product_uom_qty': 20.0}),
+                Command.create({'product_id': cls.expense_product.id, 'product_uom_qty': 1.0}),
+            ],
+        })
+        cls.order.action_confirm()
+        cls.project.reinvoiced_sale_order_id = cls.order
+        cls.line = cls.order.order_line.filtered(lambda l: l.product_id == cls.expense_product)
+
+    def expense(self, amount=100.0, mode='project', submit=True, **values):
+        expense = self.env['hr.expense'].create(dict({
+            'name': "Frais", 'employee_id': self.employee.id, 'product_id': self.category.id,
+            'total_amount_currency': amount, 'reinvoice_mode': mode,
+            'project_id': self.project.id if mode != 'todo' else False,
+        }, **values))
+        if submit:
+            expense.action_submit()
+        return expense
+
+    def approve(self, expenses):
+        expenses.sudo()._do_approve()
+
+    # ------------------------------------------------------------------
+
+    def test_approved_expenses_add_up_on_one_line(self):
+        first, second = self.expense(100.0), self.expense(50.0)
+        self.assertEqual(self.line.qty_delivered, 0.0, "waiting for the manager: nothing moves")
+        self.approve(first | second)
+        self.assertEqual(self.line.product_uom_qty, 150.0)
+        self.assertEqual(self.line.qty_delivered, 150.0)
+        self.assertEqual(self.line.price_unit, 1.0)
+        self.assertEqual(len(self.order.order_line), 2, "no line per expense")
+
+    def test_a_waiting_expense_holds_the_line_back(self):
+        done, waiting = self.expense(100.0), self.expense(30.0)
+        self.approve(done)
+        self.assertEqual(self.line.qty_delivered, 0.0,
+                         "the second expense is still waiting: the line does not move")
+        self.approve(waiting)
+        self.assertEqual(self.line.qty_delivered, 130.0)
+
+    def test_while_expenses_wait_the_line_bills_nothing_more(self):
+        self.line.product_uom_qty = 59.0
+        self.expense(30.0)
+        self.assertEqual(self.line.product_uom_qty, 0.0)
+
+    def test_an_expense_taken_back_leaves_the_line_even_while_others_wait(self):
+        first, second = self.expense(100.0), self.expense(50.0)
+        self.approve(first | second)
+        self.assertEqual(self.line.qty_delivered, 150.0)
+        self.expense(10.0)  # waits for the manager
+        second.sudo().action_expense_scan_unapprove()
+        self.assertEqual(self.line.qty_delivered, 100.0)
+
+    def test_an_activity_flags_the_order_while_expenses_wait(self):
+        activity_type = self.env.ref('expense_scan.mail_activity_type_waiting')
+        waiting = self.expense(30.0)
+        flagged = self.order.activity_ids.filtered(lambda a: a.activity_type_id == activity_type)
+        self.assertEqual(len(flagged), 1)
+        self.approve(waiting)
+        self.assertFalse(self.order.activity_ids.filtered(lambda a: a.activity_type_id == activity_type))
+
+    def test_not_re_invoiced_and_other_projects_are_left_out(self):
+        other = self.env['project.project'].create({'name': "Autre mission"})
+        kept = self.expense(40.0, mode='none')
+        elsewhere = self.expense(60.0, project_id=other.id)
+        self.approve(kept | elsewhere)
+        self.assertEqual(self.line.qty_delivered, 0.0)
+
+    def test_deciding_is_required_to_approve(self):
+        undecided = self.expense(20.0, mode='todo')
+        with self.assertRaises(UserError):
+            undecided.sudo()._do_approve()
+        undecided.reinvoice_mode = 'none'
+        undecided.sudo()._do_approve()
+        self.assertEqual(undecided.approval_state, 'approved')
+
+    def test_refusing_an_approved_expense_lowers_the_line(self):
+        first, second = self.expense(100.0), self.expense(50.0)
+        self.approve(first | second)
+        second.sudo().write({'approval_state': 'refused'})
+        self.assertEqual(self.line.qty_delivered, 100.0)
+
+    def test_invoice_notes_and_posts_the_expenses(self):
+        first, second = self.expense(100.0), self.expense(50.0)
+        self.approve(first | second)
+        self.order.order_line.filtered(lambda l: l.product_id == self.service).qty_delivered = 10.0
+        invoice = self.order._create_invoices()
+        self.assertEqual((first | second).expense_scan_invoice_id, invoice,
+                         "the draft invoice already reserves the expenses")
+        self.assertEqual((first | second).mapped('state'), ['approved', 'approved'])
+        invoice.action_post()
+        self.assertEqual((first | second).expense_scan_invoice_id, invoice)
+        self.assertEqual(self.line.qty_invoiced, 150.0)
+        for expense in first | second:
+            self.assertEqual(expense.state, 'posted', "the invoice posts the expenses it covers")
+
+    def test_next_invoice_only_takes_what_is_new(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        invoice.action_post()
+        second = self.expense(30.0)
+        self.approve(second)
+        self.assertEqual(self.line.qty_delivered, 130.0)
+        self.assertEqual(self.line.qty_to_invoice, 30.0)
+        again = self.order._create_invoices()
+        again.action_post()
+        self.assertEqual(second.expense_scan_invoice_id, again)
+        self.assertEqual(first.expense_scan_invoice_id, invoice)
+
+    def test_posted_by_hand_before_the_invoice_still_counts(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        first.sudo()._post_without_wizard()
+        self.assertIn(first.state, ('posted', 'in_payment', 'paid'))
+        self.assertEqual(self.line.qty_delivered, 100.0)
+        invoice = self.order._create_invoices()
+        invoice.action_post()
+        self.assertEqual(first.expense_scan_invoice_id, invoice)
+
+    def test_invoice_back_to_draft_releases_the_expenses(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        invoice.action_post()
+        self.assertTrue(first.expense_scan_invoice_id)
+        invoice.button_draft()
+        self.assertFalse(first.expense_scan_invoice_id)
+
+    def test_nothing_happens_when_the_company_does_not_re_invoice(self):
+        self.company.expense_scan_reinvoice = False
+        expense = self.expense(100.0)
+        self.approve(expense)
+        self.assertEqual(self.line.qty_delivered, 0.0)
+
+    def test_the_amount_re_invoiced_includes_tax(self):
+        tax = self.env['account.tax'].search([
+            ('type_tax_use', '=', 'purchase'), ('amount_type', '=', 'percent'), ('amount', '=', 20.0),
+            ('company_id', '=', self.company.id)], limit=1)
+        if not tax:
+            self.skipTest("no 20 % purchase tax")
+        expense = self.expense(120.0, tax_ids=[Command.set(tax.ids)])
+        self.approve(expense)
+        self.assertEqual(self.line.qty_delivered, 120.0)
+
+    def test_existing_price_is_respected(self):
+        self.line.price_unit = 2.0
+        expense = self.expense(100.0)
+        self.approve(expense)
+        self.assertEqual(self.line.product_uom_qty, 50.0)
+
+    def test_line_added_when_the_order_has_none(self):
+        order = self.env['sale.order'].create({
+            'partner_id': self.partner.id,
+            'order_line': [Command.create({'product_id': self.service.id, 'product_uom_qty': 5.0})],
+        })
+        order.action_confirm()
+        project = self.env['project.project'].create({
+            'name': "Sans ligne de frais", 'reinvoiced_sale_order_id': order.id})
+        expense = self.expense(70.0, project_id=project.id)
+        self.approve(expense)
+        added = order.order_line.filtered(lambda l: l.product_id.can_be_expensed)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added.product_uom_qty, 70.0)
+
+    # ------------------------------------------------------------------
+
+    def test_list_toggle(self):
+        expense = self.expense(25.0, mode='none', submit=False)
+        expense.action_expense_scan_set_reinvoice('project')
+        self.assertEqual(expense.reinvoice_mode, 'project')
+        self.assertEqual(expense.project_id, self.project)
+        expense.action_expense_scan_set_reinvoice('none')
+        self.assertEqual(expense.reinvoice_mode, 'none')
+        expense.action_expense_scan_set_reinvoice('todo')
+        self.assertEqual(expense.reinvoice_mode, 'todo')
+        self.assertEqual(expense.project_id, self.project, "the loop can come back to yes")
+
+    def test_list_toggle_loops_through_the_three_answers(self):
+        """To decide, yes, no, to decide... A click without a choice moves on."""
+        expense = self.expense(25.0, mode='none', submit=False)
+        seen = []
+        for _click in range(4):
+            expense.action_expense_scan_set_reinvoice()
+            seen.append(expense.reinvoice_mode)
+        self.assertEqual(seen, ['todo', 'project', 'none', 'todo'])
+
+    def test_an_approved_expense_stays_decided_in_the_loop(self):
+        expense = self.expense(25.0)
+        self.approve(expense)
+        seen = []
+        for _click in range(3):
+            expense.action_expense_scan_set_reinvoice()
+            seen.append(expense.reinvoice_mode)
+        self.assertEqual(seen, ['none', 'project', 'none'])
+        with self.assertRaises(UserError):
+            expense.action_expense_scan_set_reinvoice('todo')
+
+    def test_a_selection_takes_one_answer_and_leaves_the_ones_that_cannot(self):
+        with_project = self.expense(20.0, mode='none', submit=False)
+        lost = self.expense(30.0, mode='todo', submit=False)  # no mission at its date
+        result = (with_project | lost).action_expense_scan_set_reinvoice_many('project')
+        self.assertEqual(result['done'], 1)
+        self.assertEqual(len(result['left']), 1)
+        self.assertEqual(with_project.reinvoice_mode, 'project')
+        self.assertEqual(lost.reinvoice_mode, 'todo')
+        result = (with_project | lost).action_expense_scan_set_reinvoice_many('none')
+        self.assertEqual(result['done'], 2)
+
+    def test_re_invoiced_amount_for_the_list_total(self):
+        kept = self.expense(40.0, mode='none', submit=False)
+        billed = self.expense(60.0, submit=False)
+        self.assertEqual(kept.expense_scan_reinvoiced_amount, 0.0)
+        self.assertEqual(billed.expense_scan_reinvoiced_amount, 60.0)
+
+    def test_pay_the_employee_in_one_go(self):
+        approved = self.expense(40.0, mode='none')
+        invoiced = self.expense(60.0)
+        self.approve(approved | invoiced)
+        self.order._create_invoices().action_post()
+        self.assertEqual(invoiced.state, 'posted')
+        self.assertEqual(approved.state, 'approved')
+        action = (approved | invoiced).sudo().action_expense_scan_pay()
+        self.assertEqual(approved.state, 'posted', "the approved one is posted on the way")
+        self.assertEqual(action['res_model'], 'account.payment.register')
+        self.assertTrue(action['context'].get('default_group_payment'))
+
+    def test_unapprove_takes_an_approval_back(self):
+        first, second = self.expense(100.0), self.expense(40.0)
+        self.approve(first | second)
+        self.assertEqual(self.line.qty_delivered, 140.0)
+        second.sudo().action_expense_scan_unapprove()
+        self.assertEqual(second.state, 'submitted')
+        self.assertEqual(second.approval_state, 'submitted')
+        self.assertEqual(self.line.qty_delivered, 100.0,
+                         "the unapproved expense leaves the line; the line does not grow back until all are settled")
+        self.approve(second)
+        self.assertEqual(self.line.qty_delivered, 140.0)
+
+    def test_only_an_approval_can_be_taken_back(self):
+        waiting = self.expense(10.0)
+        with self.assertRaises(UserError):
+            waiting.sudo().action_expense_scan_unapprove()
+
+    def test_an_expense_on_a_draft_invoice_cannot_change(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        self.assertEqual(first.expense_scan_invoice_id, invoice)
+        with self.assertRaises(UserError):
+            first.action_expense_scan_set_reinvoice('none')
+        with self.assertRaises(UserError):
+            first.write({'reinvoice_mode': 'none'})
+        with self.assertRaises(UserError):
+            first.sudo().action_expense_scan_unapprove()
+        with self.assertRaises(UserError):
+            first.sudo().write({'total_amount_currency': 5.0})
+        with self.assertRaises(UserError):
+            first.sudo().action_reset()
+        # The way out: delete the draft, change the expense, invoice again.
+        invoice.unlink()
+        self.assertFalse(first.expense_scan_invoice_id)
+        first.action_expense_scan_set_reinvoice('none')
+        self.assertEqual(first.reinvoice_mode, 'none')
+        self.assertEqual(self.line.qty_delivered, 0.0)
+
+    def test_an_expense_on_a_posted_invoice_cannot_go_back_to_draft(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        invoice.action_post()
+        self.assertTrue(first.expense_scan_invoice_id)
+        with self.assertRaises(UserError):
+            first.sudo().action_reset()
+        with self.assertRaises(UserError):
+            first.sudo()._do_reset_approval()
+        # The way out: cancel the invoice, which gives the expense back.
+        invoice.button_draft()
+        self.assertFalse(first.expense_scan_invoice_id)
+        first.sudo().account_move_id.button_draft()
+        first.sudo().account_move_id.button_cancel()
+        first.sudo().action_reset()
+        self.assertEqual(first.state, 'draft')
+        first.action_expense_scan_set_reinvoice('none')
+        self.assertEqual(first.reinvoice_mode, 'none')
+
+    def test_the_create_invoice_button_warns_about_waiting_expenses(self):
+        action = self.env.ref('sale.action_view_sale_advance_payment_inv')
+        Expense = self.env['hr.expense']
+        self.assertFalse(Expense.expense_scan_order_warning(self.order.id, action.id))
+        waiting = self.expense(30.0)
+        warning = Expense.expense_scan_order_warning(self.order.id, action.id)
+        self.assertTrue(warning)
+        self.assertIn('1', warning)
+        self.assertFalse(Expense.expense_scan_order_warning(self.order.id, action.id + 1),
+                         "only the button that creates invoices")
+        self.approve(waiting)
+        self.assertFalse(Expense.expense_scan_order_warning(self.order.id, action.id))
+
+    # -- Without a project there is nothing to decide -------------------------------------------
+
+    def bare_expense(self, **values):
+        return self.env['hr.expense'].create(dict({
+            'name': "Sans projet", 'employee_id': self.employee.id, 'product_id': self.category.id,
+            'total_amount_currency': 20.0}, **values))
+
+    def test_an_expense_without_a_project_is_not_re_invoiced_and_nothing_blocks_it(self):
+        expense = self.bare_expense()
+        self.assertEqual(expense.reinvoice_mode, 'none')
+        expense.action_submit()
+        self.approve(expense)
+        self.assertEqual(expense.approval_state, 'approved')
+        self.assertFalse(expense.expense_scan_todo_pending)
+
+    def test_an_expense_created_with_a_project_still_has_to_be_decided(self):
+        self.assertEqual(self.bare_expense(project_id=self.project.id).reinvoice_mode, 'todo')
+        by_default = self.env['hr.expense'].with_context(
+            default_project_id=self.project.id).create({
+                'name': "Projet par défaut", 'employee_id': self.employee.id,
+                'product_id': self.category.id, 'total_amount_currency': 5.0})
+        self.assertEqual(by_default.reinvoice_mode, 'todo')
+
+    def test_an_explicit_answer_is_kept(self):
+        self.assertEqual(self.bare_expense(reinvoice_mode='todo').reinvoice_mode, 'todo')
+        self.assertEqual(self.bare_expense(project_id=self.project.id, reinvoice_mode='none').reinvoice_mode, 'none')
+
+    def test_leaving_the_project_ends_the_re_invoicing(self):
+        expense = self.expense(30.0, submit=False)
+        self.assertEqual(expense.reinvoice_mode, 'project')
+        expense.project_id = False
+        self.assertEqual(expense.reinvoice_mode, 'none')
+
+    def test_choosing_a_project_by_hand_says_yes_and_removing_it_says_no(self):
+        expense = self.env['hr.expense'].new({
+            'employee_id': self.employee.id, 'product_id': self.category.id})
+        self.assertEqual(expense.reinvoice_mode, 'none')
+        expense.project_id = self.project
+        expense._onchange_expense_scan_project()
+        self.assertEqual(expense.reinvoice_mode, 'project')
+        expense.project_id = False
+        expense._onchange_expense_scan_project()
+        self.assertEqual(expense.reinvoice_mode, 'none')
+
+    def test_a_no_given_to_an_expense_that_has_a_project_is_kept_when_the_project_changes(self):
+        saved = self.expense(30.0, mode='none', submit=False)
+        other = self.env['project.project'].create({'name': "Autre mission"})
+        edited = saved.new({'project_id': other.id, 'reinvoice_mode': 'none'}, origin=saved)
+        edited._onchange_expense_scan_project()
+        self.assertEqual(edited.reinvoice_mode, 'none')
+
+    def test_the_toggle_of_an_expense_without_a_project_goes_to_yes(self):
+        expense = self.bare_expense()
+        self.assertEqual(expense._expense_scan_next_reinvoice(), 'project')
+        with self.assertRaises(UserError):
+            expense.action_expense_scan_set_reinvoice()  # no mission at its date
+
+    def test_the_scan_says_yes_to_the_project_it_finds_for_an_expense_without_one(self):
+        receipt = reading("BRASSERIE\nTOTAL 11,00 EUR")
+        bare = self.bare_expense()
+        with patch.object(type(bare), '_expense_scan_find_project', return_value=self.project):
+            values = bare._expense_scan_field_values(receipt, bare.company_id)
+        self.assertEqual(values['project_id'], self.project.id)
+        self.assertEqual(values['reinvoice_mode'], 'project')
+        # A "No" the employee gave to an expense that has a project is theirs.
+        kept = self.expense(10.0, mode='none', submit=False)
+        with patch.object(type(kept), '_expense_scan_find_project', return_value=self.project):
+            values = kept._expense_scan_field_values(receipt, kept.company_id)
+        self.assertEqual(values['reinvoice_mode'], 'none')
+
+    def test_the_scan_does_not_ask_to_decide_when_no_project_is_found(self):
+        bare = self.bare_expense()
+        with patch.object(type(bare), '_expense_scan_store_image', autospec=True, return_value={}):
+            bare.with_context(lang='en_US')._expense_scan_apply(
+                reading("BRASSERIE\nTOTAL 11,00 EUR"), self.env['ir.attachment'])
+        self.assertNotIn('reinvoice', (bare.expense_scan_todo_codes or '').split(','))
+        self.assertEqual(bare.reinvoice_mode, 'none')
+
+    def test_the_update_closes_the_open_question_of_expenses_without_a_project(self):
+        waiting = self.bare_expense(reinvoice_mode='todo')
+        with_project = self.bare_expense(project_id=self.project.id)
+        _migration('19.0.2.14.0', 'post-migrate.py').migrate(self.env.cr, '19.0.2.13.0')
+        waiting.invalidate_recordset()
+        with_project.invalidate_recordset()
+        self.assertEqual(waiting.reinvoice_mode, 'none')
+        self.assertEqual(with_project.reinvoice_mode, 'todo')
+
+    def test_list_toggle_needs_a_project(self):
+        expense = self.expense(25.0, mode='todo', submit=False)
+        with self.assertRaises(UserError):
+            expense.action_expense_scan_set_reinvoice('project')
+
+    def test_budget_figures(self):
+        self.project.expense_scan_budget = 300.0
+        approved, waiting = self.expense(100.0), self.expense(50.0)
+        self.approve(approved)
+        project = self.project
+        project.invalidate_recordset()
+        self.assertEqual(project.expense_scan_spent, 100.0)
+        self.assertEqual(project.expense_scan_waiting, 50.0)
+        self.assertEqual(project.expense_scan_left, 150.0)
+        self.assertAlmostEqual(project.expense_scan_progress, 50.0)
+        self.assertFalse(project.expense_scan_over_budget)
+        self.expense(200.0)
+        project.invalidate_recordset()
+        self.assertTrue(project.expense_scan_over_budget)
+        self.assertEqual(project.expense_scan_held_back, 2)
+
+    # ------------------------------------------------------------------
+    # Review of 03/10/2026
+    # ------------------------------------------------------------------
+
+    def _internal_user(self, name="Interne"):
+        return self.env['res.users'].create({
+            'name': name, 'login': '%s@example.com' % name.lower(),
+            'group_ids': [Command.set([self.env.ref('base.group_user').id])]})
+
+    def test_the_line_added_by_the_module_keeps_the_order_tax(self):
+        """The expenses are billed at their amount incl. tax, then the order's VAT applies on it."""
+        tax = self.env['account.tax'].create({'name': "TVA ligne frais", 'amount': 20.0, 'type_tax_use': 'sale'})
+        # The product the module puts on a new line: the first expense product of the base.
+        self.env['hr.expense']._expense_scan_line_product(self.env.company).taxes_id = [Command.set(tax.ids)]
+        order = self.env['sale.order'].create({
+            'partner_id': self.partner.id,
+            'order_line': [Command.create({'product_id': self.service.id, 'product_uom_qty': 5.0})],
+        })
+        order.action_confirm()
+        project = self.env['project.project'].create({'name': "Avec taxe", 'reinvoiced_sale_order_id': order.id})
+        self.approve(self.expense(70.0, project_id=project.id))
+        added = order.order_line.filtered(lambda l: l.product_id.can_be_expensed)
+        self.assertEqual(len(added), 1)
+        self.assertEqual(added.tax_ids, tax, "the order's own VAT applies as on any line")
+        self.assertEqual(added.product_uom_qty, 70.0)
+        if added.qty_delivered_method == 'manual':
+            self.assertEqual(added.qty_delivered, 70.0, "ready to invoice at once")
+
+    def test_a_credit_note_for_the_whole_invoice_gives_the_expenses_back(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        invoice.action_post()
+        self.assertEqual(first.expense_scan_invoice_id, invoice)
+        self.env['account.move.reversal'].with_context(
+            active_model='account.move', active_ids=invoice.ids).create({
+                'journal_id': invoice.journal_id.id}).refund_moves()
+        refund = invoice.reversal_move_ids
+        self.assertTrue(refund)
+        refund.action_post()
+        self.assertFalse(first.expense_scan_invoice_id, "free to be invoiced again")
+
+    def test_only_the_invoicing_sets_the_invoice_of_an_expense(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        user = self._internal_user()
+        with self.assertRaises(AccessError):
+            first.with_user(user).write({'expense_scan_invoice_id': False})
+        with self.assertRaises(AccessError):
+            self.env['hr.expense'].with_user(user).create({
+                'name': "Frais", 'employee_id': self.employee.id, 'product_id': self.category.id,
+                'total_amount_currency': 5.0, 'expense_scan_invoice_id': invoice.id})
+
+    def test_a_context_flag_from_a_client_does_not_open_the_lock(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        self.order._create_invoices()
+        user = self._internal_user()
+        try:
+            first.with_user(user).with_context(expense_scan_free=True).write({'total_amount_currency': 1.0})
+        except (UserError, AccessError):
+            pass
+        else:
+            self.fail("the lock must hold")
+
+    def test_only_accountants_reimburse(self):
+        first = self.expense(40.0, mode='none')
+        self.approve(first)
+        with self.assertRaises(AccessError):
+            first.with_user(self._internal_user()).action_expense_scan_pay()
+
+    def test_the_date_of_an_invoiced_expense_is_locked(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        self.order._create_invoices()
+        with self.assertRaises(UserError):
+            first.write({'date': '2031-01-01'})
+
+    def test_an_employee_links_only_the_projects_they_are_assigned_to(self):
+        user = self._internal_user("Lea")
+        employee = self.env['hr.employee'].create({'name': "Lea Affectee", 'user_id': user.id})
+        expense = self.env['hr.expense'].create({
+            'name': "Frais", 'employee_id': employee.id, 'product_id': self.category.id,
+            'total_amount_currency': 10.0})
+        with self.assertRaises(ValidationError):
+            expense.with_user(user).write({'project_id': self.project.id})
+        # A project manager assigns her to a task of the project: she can link it.
+        self.env['project.task'].create({
+            'name': "Tache", 'project_id': self.project.id, 'user_ids': [Command.set(user.ids)]})
+        expense.with_user(user).write({'project_id': self.project.id})
+        self.assertEqual(expense.project_id, self.project)
+
+    def test_the_default_invoice_of_the_context_is_refused_too(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        invoice = self.order._create_invoices()
+        with self.assertRaises(AccessError):
+            self.env['hr.expense'].with_user(self._internal_user("Defaut")).with_context(
+                default_expense_scan_invoice_id=invoice.id).create({
+                    'name': "Frais", 'employee_id': self.employee.id, 'product_id': self.category.id,
+                    'total_amount_currency': 5.0})
+
+    def test_a_scan_does_not_rewrite_an_approved_expense(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        with self.assertRaises(UserError):
+            first.with_user(self.env.ref('base.user_admin')).action_expense_scan_rescan()
+
+    def test_the_batch_reset_leaves_the_invoiced_expenses_alone(self):
+        invoiced, free = self.expense(100.0), self.expense(40.0, mode='none')
+        self.approve(invoiced | free)
+        self.order._create_invoices()
+        (invoiced | free).sudo().action_expense_scan_reset_batch()
+        self.assertEqual(invoiced.state, 'approved')
+        self.assertEqual(free.state, 'draft')
+
+    def _mixed_invoice(self):
+        first = self.expense(100.0)
+        self.approve(first)
+        self.order.order_line.filtered(lambda l: l.product_id == self.service).qty_delivered = 4.0
+        invoice = self.order._create_invoices()
+        invoice.action_post()
+        self.assertEqual(first.expense_scan_invoice_id, invoice)
+        self.env['account.move.reversal'].with_context(
+            active_model='account.move', active_ids=invoice.ids).create({
+                'journal_id': invoice.journal_id.id}).refund_moves()
+        return first, invoice, invoice.reversal_move_ids
+
+    def test_a_credit_note_of_the_expense_line_alone_gives_the_expenses_back(self):
+        first, invoice, refund = self._mixed_invoice()
+        refund.invoice_line_ids.filtered(lambda l: l.product_id == self.service).unlink()
+        refund.action_post()
+        self.assertFalse(first.expense_scan_invoice_id)
+        self.assertEqual(self.line.qty_to_invoice, 100.0, "the line is to invoice again")
+
+    def test_a_credit_note_of_the_service_alone_keeps_the_expenses_invoiced(self):
+        first, invoice, refund = self._mixed_invoice()
+        refund.invoice_line_ids.filtered(lambda l: l.product_id == self.expense_product).unlink()
+        refund.action_post()
+        self.assertEqual(first.expense_scan_invoice_id, invoice)

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 T.T.C. SAS
+     License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0). -->
+<templates xml:space="preserve">
+
+    <t t-name="expense_scan.ReceiptPreview">
+        <div t-if="visible" class="o_expense_scan_preview"
+             t-att-class="{ 'o_expense_scan_preview_expanded': state.expanded }">
+            <img t-if="imageUrl" class="o_expense_scan_preview_img"
+                 t-att-src="imageUrl"
+                 t-att-alt="attachment.name"
+                 t-on-click="onOpenViewer"/>
+            <i t-else="" class="fa fa-file-pdf-o fa-3x text-muted my-4" role="img"
+               t-att-aria-label="attachment.name" t-on-click="onOpenViewer"/>
+            <div class="o_expense_scan_preview_actions">
+                <button type="button" class="btn btn-sm btn-light"
+                        t-on-click="onToggle" t-att-title="toggleLabel">
+                    <i class="fa" t-att-class="state.expanded ? 'fa-compress' : 'fa-expand'"
+                       role="img" t-att-aria-label="toggleLabel"/>
+                </button>
+                <button t-if="canRetouch" type="button" class="btn btn-sm btn-light"
+                        t-on-click="onRetouch" title="Retouch">
+                    <i class="fa fa-crop" role="img" aria-label="Retouch"/>
+                </button>
+                <button type="button" class="btn btn-sm btn-light"
+                        t-on-click="onOpenViewer" title="Open full screen">
+                    <i class="fa fa-search-plus" role="img" aria-label="Open full screen"/>
+                </button>
+            </div>
+        </div>
+    </t>
+
+</templates>
