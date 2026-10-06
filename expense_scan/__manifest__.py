@@ -3,7 +3,7 @@
 # License LGPL-3.0 or later (https://www.gnu.org/licenses/lgpl-3.0).
 {
     'name': "Expense Receipt Scanner",
-    'version': '19.0.3.1.0',
+    'version': '20.0.3.1.0',
     'summary': "Expense receipt scanner with local OCR: photograph a receipt and an AI on your own server fills in "
                "the expense (merchant, date, total, VAT, category). No API key, no fee per scan.",
     'author': "T.T.C. SAS",
@@ -18,8 +18,7 @@
         'bin': ['pdftoppm'],
     },
     'data': [
-        'security/ir.model.access.csv',
-        'security/expense_scan_rules.xml',
+        'security/ir.access.csv',
         'report/expense_sheet_report.xml',
         'data/export_templates.xml',
         'data/expense_policies.xml',
